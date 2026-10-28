@@ -57,7 +57,13 @@ class Model(Diffable):
         """
         Return the weights of the model by iterating through the layers
         """
-        return NotImplementedError
+        all_weights = []
+
+        for layer in self.layers:
+            for weight in layer.weights:
+                all_weights.append(weight)
+        
+        return all_weights
 
     def compile(self, optimizer: Diffable, loss_fn: Diffable, acc_fn: Callable):
         """
@@ -74,7 +80,30 @@ class Model(Diffable):
         Trains the model by iterating over the input dataset and feeding input batches
         into the batch_step method with training. At the end, the metrics are returned.
         """
-        return NotImplementedError
+        number_of_batches = int(np.ceil(len(x) / batch_size))
+        history = defaultdict(list)
+
+        for epoch in range(epochs):
+            epoch_metrics = defaultdict(list)
+
+            for batch_num in range(number_of_batches):
+                starting_data_index = batch_num * batch_size
+                ending_data_index = starting_data_index + batch_size
+
+                x_batch = x[starting_data_index:ending_data_index]
+                y_batch = y[starting_data_index:ending_data_index]
+
+                batch_metrics = self.batch_step(x_batch, y_batch, training=True)
+
+                for key, value in batch_metrics.items():
+                    epoch_metrics[key].append(value)
+                
+                print_stats(batch_metrics, batch_num=batch_num, num_batches=number_of_batches, epoch=epoch)
+            
+            update_metric_dict(history, epoch_metrics)
+            print_stats(epoch_metrics, epoch=epoch, avg=True)
+        
+        return dict(history)
 
     def evaluate(self, x: Tensor, y: Union[Tensor, np.ndarray], batch_size: int):
         """
@@ -86,7 +115,32 @@ class Model(Diffable):
         NOTE: This method is almost identical to fit (think about how training and testing differ --
         the core logic should be the same)
         """
-        return NotImplementedError
+        number_of_batches = int(np.ceil(len(x) / batch_size))
+        metrics = defaultdict(list)
+        predictions = []
+
+        for batch_num in range(number_of_batches):
+            starting_data_index = batch_num * batch_size
+            ending_data_index = starting_data_index + batch_size
+
+            x_batch = x[starting_data_index:ending_data_index]
+            y_batch = y[starting_data_index:ending_data_index]
+
+            batch_metrics, batch_predictions = self.batch_step(x_batch, y_batch, training=False)
+
+            for key, value in batch_metrics.items():
+                metrics[key].append(value)
+            
+            predictions.append(batch_predictions)
+        
+        final_metrics = {}
+
+        for key, values in metrics.items():
+            final_metrics[key] = np.mean(values)
+        
+        predictions = np.concatenate(predictions, axis=0)
+
+        return final_metrics, predictions
 
     def get_input_gradients(self) -> list[Tensor]:
         return super().get_input_gradients()
@@ -108,7 +162,13 @@ class SequentialModel(Model):
         """Forward pass in sequential model. It's helpful to note that layers are initialized in beras.Model, and
         you can refer to them with self.layers. You can call a layer by doing var = layer(input).
         """
-        return NotImplementedError
+        
+        layer_output = inputs
+
+        for layer in self.layers:
+            layer_output = layer(layer_output)
+        
+        return layer_output
 
     def batch_step(self, x:Tensor, y: Tensor, training: bool =True) -> dict[str, float]:
         """Computes loss and accuracy for a batch. This step consists of both a forward and backward pass.
@@ -116,8 +176,17 @@ class SequentialModel(Model):
         will take place within the scope of Beras.GradientTape()"""
         ## TODO: Compute loss and accuracy for a batch. Return as a dictionary
         ## If training, then also update the gradients according to the optimizer
+
+        with GradientTape() as tape:
+            predictions = self.forward(x)
+            loss = self.compiled_loss(predictions, y)
+        
+        accuracy = self.compiled_acc(predictions, y)
     
         if training:
-            return {"loss": ???, "acc": ???}
+            gradients = tape.gradient(loss, self.trainable_variables)
+            self.optimizer.apply_gradients(self.trainable_variables, gradients)
+
+            return {"loss": loss, "acc": accuracy}
         else:
-            return {"loss": ???, "acc": ???}, predictions
+            return {"loss": loss, "acc": accuracy}, predictions

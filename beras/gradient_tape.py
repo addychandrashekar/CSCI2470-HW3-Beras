@@ -39,3 +39,41 @@ class GradientTape:
 
         # What tensor and what gradient is for you to implement!
         # compose_input_gradients and compose_weight_gradients are methods that will be helpful
+
+        while queue:
+            current = queue.pop(0)
+            layer = self.previous_layers[id(current)]
+
+            if layer is None:
+                continue
+
+            upstream = grads[id(current)]
+            
+            input_gradients = layer.compose_input_gradients(upstream)
+            weight_gradients = layer.compose_weight_gradients(upstream)
+
+            for i in range(len(layer.weights)):
+                weight = layer.weights[i]
+                
+                #if the weight contributes to multiple different paths, then we need to accumulate gradients for all paths
+                if grads[id(weight)] is None:
+                    grads[id(weight)] = [weight_gradients[i]]
+                else:
+                    grads[id(weight)][0] += weight_gradients[i]
+            
+            for i in range(len(layer.inputs)):
+                layer_input = layer.inputs[i]
+
+                if grads[id(layer_input)] is None:
+                    grads[id(layer_input)] = [input_gradients[i]]
+                else:
+                    grads[id(layer_input)][0] += input_gradients[i]
+                
+                queue.append(layer_input)
+        
+        result = []
+
+        for source in sources:
+            result.append(grads[id(source)][0])
+        
+        return result
